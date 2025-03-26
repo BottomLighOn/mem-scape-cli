@@ -1,4 +1,4 @@
-![](https://s4.ezgif.com/tmp/ezgif-45bc7f7b719fd4.gif)
+![](https://cdn.discordapp.com/attachments/801036275691946015/1354308127746691195/cat.gif)
 # mem-scape-cli
 A tool for analyzing memory, programs, games and anything else you need, written in C++ specifically for Windows
 # Starting the debugger
