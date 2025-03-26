@@ -28,7 +28,7 @@ class scanner
     std::vector<memory_region> scanned_regions;
     std::vector<scanned_value<int>> scanned_ints;
     std::mutex results_mutex;
-    static const int num_threads = 64;
+    static const int num_threads = 4;
     void search_int_thread(int value, size_t start_idx, size_t end_idx);
     void filter_int_thread(int value, size_t start_idx, size_t end_idx, const std::vector<scanned_value<int>>& source_values);
 public:
@@ -44,6 +44,7 @@ public:
     int get_scanned_count();
     void search_int(int value);
     void filter_int(int value);
+    bool is_avx_instructions_supported();
     template<typename T>
     void search(T value) {
         if (std::is_same<T, int>::value) {
