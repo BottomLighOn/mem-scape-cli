@@ -109,7 +109,6 @@ void core_debugger::handler() {
             switch (event_code) {
             case CREATE_PROCESS_DEBUG_EVENT:
                 debug::print("[debugger] Process created");
-                // Закрываем дескриптор, чтобы избежать утечки ресурсов
                 if (current_debug_event.u.CreateProcessInfo.hFile != NULL) {
                     CloseHandle(current_debug_event.u.CreateProcessInfo.hFile);
                 }
@@ -133,7 +132,6 @@ void core_debugger::handler() {
 
             case LOAD_DLL_DEBUG_EVENT:
                 debug::print("[debugger] DLL loaded");
-                // Закрываем дескриптор, чтобы избежать утечки ресурсов
                 if (current_debug_event.u.LoadDll.hFile != NULL) {
                     CloseHandle(current_debug_event.u.LoadDll.hFile);
                 }
@@ -156,7 +154,6 @@ void core_debugger::handler() {
                 debug::print_fmt("[debugger] Exception caught: 0x%X at address 0x%llX (first chance: %s)",
                                  exception_code_, exception_address, first_chance ? "yes" : "no");
 
-                 // Определяем тип исключения
                 DWORD continue_status = DBG_EXCEPTION_NOT_HANDLED;
 
                 switch (exception_code_) {
@@ -196,7 +193,6 @@ void core_debugger::handler() {
                     break;
                 }
 
-                // Продолжаем выполнение с определенным статусом
                 if (!ContinueDebugEvent(current_debug_event.dwProcessId,
                     current_debug_event.dwThreadId,
                     continue_status)) {
@@ -204,8 +200,7 @@ void core_debugger::handler() {
                     debug::print_fmt("[debugger] Failed to continue debug event: %d", error);
                 }
 
-                // Важно: не вызываем ContinueDebugEvent повторно в общем блоке кода
-                continue;  // Переходим к следующей итерации цикла
+                continue;
             }
             break;
 
@@ -275,7 +270,6 @@ bool core_debugger::is_target_process_running() {
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, target_pid);
     if (hProcess == NULL) {
         debug::print_fmt("[debugger] Process %d does not exist, disabling debugger.", target_pid);
-        CloseHandle(hProcess);
         return false;
     }
     CloseHandle(hProcess);

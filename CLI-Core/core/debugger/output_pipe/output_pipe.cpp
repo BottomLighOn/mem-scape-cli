@@ -11,7 +11,6 @@ namespace debug {
     {
     public:
         DebuggerImpl() : h_pipe(INVALID_HANDLE_VALUE), connected(false) {
-            // Path to debugger console (should be in the same directory)
             char buffer[MAX_PATH];
             GetModuleFileNameA(NULL, buffer, MAX_PATH);
             std::string path(buffer);
@@ -23,47 +22,41 @@ namespace debug {
             disconnect();
         }
 
-        // Start the debugger console
         bool start_debugger_console() {
-            // Check if executable file exists
             DWORD file_attr = GetFileAttributesA(debugger_path.c_str());
             if (file_attr == INVALID_FILE_ATTRIBUTES) {
                 std::cerr << "Error: Debugger console file not found: " << debugger_path << std::endl;
                 return false;
             }
 
-            // Launch debugger console
             STARTUPINFOA si = {0};
             PROCESS_INFORMATION pi = {0};
             si.cb = sizeof(STARTUPINFOA);
 
             if (!CreateProcessA(
-                NULL,                           // Module name (NULL = use command line)
-                const_cast<char*>(debugger_path.c_str()), // Command line
-                NULL,                           // Process security attributes
-                NULL,                           // Thread security attributes
-                FALSE,                          // Handle inheritance
-                CREATE_NEW_CONSOLE,             // Creation flags
-                NULL,                           // Environment block
-                NULL,                           // Current directory
-                &si,                            // Startup info
-                &pi                             // Process info
+                NULL,                           
+                const_cast<char*>(debugger_path.c_str()), 
+                NULL,                           
+                NULL,                           
+                FALSE,                          
+                CREATE_NEW_CONSOLE,             
+                NULL,                          
+                NULL,                          
+                &si,                            
+                &pi                            
                 )) {
                 std::cerr << "Error launching debugger console: " << GetLastError() << std::endl;
                 return false;
             }
 
-            // Close process and thread handles
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
 
-            // Give time for console to start
             std::this_thread::sleep_for(std::chrono::seconds(1));
 
             return true;
         }
 
-        // Connect to debugger console
         bool connect() {
             std::lock_guard<std::mutex> lock(pipe_mutex);
 
@@ -71,20 +64,18 @@ namespace debug {
                 return true;
             }
 
-            // Try to connect to named pipe
             for (int i = 0; i < 10; i++) {
                 h_pipe = CreateFileA(
-                    PIPE_NAME.c_str(),           // Pipe name
-                    GENERIC_WRITE,               // Access mode (write only)
-                    0,                           // Share mode
-                    NULL,                        // Security attributes
-                    OPEN_EXISTING,               // Open mode
-                    0,                           // Flags and attributes
-                    NULL                         // Template
+                    PIPE_NAME.c_str(),           
+                    GENERIC_WRITE,            
+                    0,                           
+                    NULL,                        
+                    OPEN_EXISTING,             
+                    0,                           
+                    NULL                         
                 );
 
                 if (h_pipe != INVALID_HANDLE_VALUE) {
-                    // Set message mode
                     DWORD mode = PIPE_READMODE_MESSAGE;
                     if (SetNamedPipeHandleState(h_pipe, &mode, NULL, NULL)) {
                         connected = true;
@@ -96,12 +87,10 @@ namespace debug {
                     }
                 }
 
-                // If connection failed, try to start debugger console
                 if (i == 0) {
                     start_debugger_console();
                 }
 
-                // Wait and try again
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
 
@@ -109,25 +98,18 @@ namespace debug {
             return false;
         }
 
-        // Disconnect from debugger console
         void disconnect() {
-            //std::lock_guard<std::mutex> lock(pipe_mutex);
 
-            // Проверяем, что соединение активно и дескриптор пайпа валидный
             if (connected && h_pipe != INVALID_HANDLE_VALUE) {
                 try {
-                    // Отправляем команду выхода только если соединение активно
                     print("EXIT_DEBUGGER");
 
-                    // Закрываем дескриптор пайпа
                     if (h_pipe != INVALID_HANDLE_VALUE) {
                         CloseHandle(h_pipe);
                         h_pipe = INVALID_HANDLE_VALUE;
                     }
                 }
                 catch (...) {
-                    // Игнорируем любые исключения при отключении
-                    // Это предотвратит аварийное завершение
                     if (h_pipe != INVALID_HANDLE_VALUE) {
                         CloseHandle(h_pipe);
                         h_pipe = INVALID_HANDLE_VALUE;
@@ -135,7 +117,6 @@ namespace debug {
                 }
             }
 
-            // В любом случае сбрасываем флаг подключения
             connected = false;
             if (h_pipe != INVALID_HANDLE_VALUE) {
                 CloseHandle(h_pipe);
@@ -143,7 +124,6 @@ namespace debug {
             }
         }
 
-        // Print message to debugger console
         bool print(const std::string& message) {
             std::lock_guard<std::mutex> lock(pipe_mutex);
 
@@ -153,13 +133,13 @@ namespace debug {
 
             DWORD bytes_written;
             if (!WriteFile(
-                h_pipe,                         // Pipe handle
-                message.c_str(),                // Buffer to write
-                static_cast<DWORD>(message.length() + 1), // Number of bytes to write
-                &bytes_written,                 // Number of bytes written
-                NULL                            // Not using async I/O
+                h_pipe,
+                message.c_str(),
+                static_cast<DWORD>(message.length() + 1),
+                &bytes_written,
+                NULL
                 )) {
-                    // Write error, debugger console may have been closed
+
                 CloseHandle(h_pipe);
                 h_pipe = INVALID_HANDLE_VALUE;
                 connected = false;
