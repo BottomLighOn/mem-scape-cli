@@ -97,7 +97,7 @@ void scanner::search_int_thread(int value, size_t start_idx, size_t end_idx) {
                     }
                 }
             }
-            base_address += buffer_size * sizeof(int);
+            base_address += buffer.size() * sizeof(int);
         }
     }
 
