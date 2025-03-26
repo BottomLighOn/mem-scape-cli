@@ -110,14 +110,43 @@ void scanner::search_int_thread(int value, size_t start_idx, size_t end_idx) {
 
 void scanner::filter_int(int value) {
     std::vector<scanned_value<int>> scanned_ints_local = std::move(scanned_ints);
+    scanned_ints.clear();
+
+    size_t values_per_thread = (scanned_ints_local.size() + num_threads - 1) / num_threads;
+    std::vector<std::thread> local_threads;
+
+    for (size_t i = 0; i < num_threads; i++) {
+        size_t start_idx = i * values_per_thread;
+        size_t end_idx = min((i + 1) * values_per_thread, scanned_ints_local.size());
+
+        if (start_idx >= scanned_ints_local.size())
+            break;
+
+        local_threads.emplace_back(&scanner::filter_int_thread, this, value, start_idx, end_idx, std::ref(scanned_ints_local));
+    }
+
+    for (auto& thread : local_threads) {
+        thread.join();
+    }
+}
+
+void scanner::filter_int_thread(int value, size_t start_idx, size_t end_idx, const std::vector<scanned_value<int>>& source_values) {
+    std::vector<scanned_value<int>> local_results;
     int buffer = -1;
-    for (auto& v : scanned_ints_local) {
+
+    for (size_t i = start_idx; i < end_idx; i++) {
+        const auto& v = source_values[i];
         size_t bytes_read = 0;
         if (ReadProcessMemory(attached_handle, (void*)v.address, &buffer, sizeof(int), &bytes_read)) {
             if (buffer == value) {
-                scanned_ints.push_back({buffer, v.address});
+                local_results.push_back({buffer, v.address});
             }
         }
+    }
+
+    if (!local_results.empty()) {
+        std::lock_guard<std::mutex> lock(results_mutex);
+        scanned_ints.insert(scanned_ints.end(), local_results.begin(), local_results.end());
     }
 }
 

@@ -30,6 +30,7 @@ class scanner
     std::mutex results_mutex;
     static const int num_threads = 64;
     void search_int_thread(int value, size_t start_idx, size_t end_idx);
+    void filter_int_thread(int value, size_t start_idx, size_t end_idx, const std::vector<scanned_value<int>>& source_values);
 public:
     static scanner* instance() {
         static scanner singleton;
