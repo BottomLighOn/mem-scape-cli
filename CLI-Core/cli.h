@@ -74,27 +74,40 @@ R"""(
             std::string token;
             bool in_quotes = false;
             char quote_char = 0;
+            std::string current;
 
-            while (stream >> std::noskipws >> token) {
-                if ((token.front() == '"' || token.front() == '\'') && !in_quotes) {
-                    in_quotes = true;
-                    quote_char = token.front();
-                    token.erase(0, 1);
-                }
-
+            char c;
+            while (stream.get(c)) {
                 if (in_quotes) {
-                    if (token.back() == quote_char) {
-                        token.pop_back();
+                    if (c == quote_char) {
                         in_quotes = false;
                     }
-                    tokens.back() += " " + token;
+                    else {
+                        current += c;
+                    }
                 }
                 else {
-                    tokens.push_back(token);
+                    if (c == '"' || c == '\'') {
+                        in_quotes = true;
+                        quote_char = c;
+                    }
+                    else if (c == ' ') {
+                        if (!current.empty()) {
+                            tokens.push_back(current);
+                            current.clear();
+                        }
+                    }
+                    else {
+                        current += c;
+                    }
                 }
+            }
+            if (!current.empty()) {
+                tokens.push_back(current);
             }
             return tokens;
         }
+
         std::string get_welcome_message() {
             char username[UNLEN + 1];
             DWORD username_len = UNLEN + 1;
@@ -244,6 +257,7 @@ R"""(
                 }
                 std::cout << "Ivalid usage.\nCheck [help]\n";
             };
+
             commands["scan"] = [this] (const std::vector<std::string>& args) -> void {
                 auto core = core::core::instance();
                 auto scanner = scanner::instance();
@@ -255,13 +269,24 @@ R"""(
                     return;
                 }
 
+                if (args.size() == 1) {
+                    if (args[0] == "print") {
+                        scanner->print_scanned_ints();
+                    }
+                    return;
+                }
+
                 if (args.size() == 3) {
                     if (args[0] == "search" && args[1] == "int") {
                         int value = atoi(args[2].c_str());
                         scanner->setup(core->get_pid(), core->get_handle());
                         scanner->scan_regions();
                         scanner->search(value);
-                        scanner->print_scanned_ints();
+                        int scanned_count = scanner->get_scanned_count();
+                        std::cout << "Found " << scanned_count << " values\n";
+                        if (scanned_count < 250) {
+                            scanner->print_scanned_ints();
+                        }
                         return;
                     }
 
@@ -274,11 +299,7 @@ R"""(
                     }
                 }
 
-               
                 std::cout << "Invalid usage!\nCheck [help]\n";
-                for (auto& a : args) {
-                    std::cout << a.c_str() << std::endl;
-                }
                 return;
             };
         }

@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <mutex>
 
 struct memory_region
 {
@@ -26,6 +27,9 @@ class scanner
     HANDLE attached_handle;
     std::vector<memory_region> scanned_regions;
     std::vector<scanned_value<int>> scanned_ints;
+    std::mutex results_mutex;
+    static const int num_threads = 64;
+    void search_int_thread(int value, size_t start_idx, size_t end_idx);
 public:
     static scanner* instance() {
         static scanner singleton;
@@ -36,6 +40,7 @@ public:
     void scan_regions();
     void print_regions();
     void print_scanned_ints();
+    int get_scanned_count();
     void search_int(int value);
     void filter_int(int value);
     template<typename T>
