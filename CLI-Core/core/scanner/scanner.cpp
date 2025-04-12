@@ -1,6 +1,7 @@
 #include "scanner.h"
 #include <iostream>
 #include <thread>
+#include <algorithm>
 
 void scanner::setup(DWORD pid, HANDLE handle) {
     attached_pid = pid;
@@ -73,9 +74,32 @@ void scanner::search_int(int value){
 }
 
 void scanner::search_int_thread(int value, size_t start_idx, size_t end_idx) {
-    const size_t buffer_size = 4096;
+    const size_t buffer_size = 32768;
     std::vector<int> buffer(buffer_size / sizeof(int));
+
+    const size_t CACHE_SIZE = 16384;
+    scanned_value<int>* cache_buffer = new scanned_value<int>[CACHE_SIZE];
+    memset(cache_buffer, 0, sizeof(scanned_value<int>[CACHE_SIZE]));
+
+    size_t cache_count = 0;
+
     std::vector<scanned_value<int>> local_results;
+    local_results.reserve(1000000);
+
+    auto flush_cache = [&] () {
+        if (cache_count > 0) {
+            if (local_results.size() + cache_count > local_results.capacity()) {
+                local_results.reserve(max(local_results.capacity() * 2,
+                                      local_results.size() + cache_count));
+            }
+
+            local_results.insert(local_results.end(),
+                                 cache_buffer,
+                                 cache_buffer + cache_count);
+
+            cache_count = 0;
+        }
+    };
 
     for (size_t i = start_idx; i < end_idx; i++) {
         auto& region = scanned_regions[i];
@@ -87,24 +111,40 @@ void scanner::search_int_thread(int value, size_t start_idx, size_t end_idx) {
         uintptr_t end_address = region.start_adress + region.size;
 
         while (base_address < end_address) {
+            size_t bytes_to_read = min(buffer_size, static_cast<size_t>(end_address - base_address));
             size_t bytes_read = 0;
+
             if (ReadProcessMemory(attached_handle, (void*)base_address, buffer.data(),
-                buffer.size() * sizeof(int), &bytes_read)) {
+                bytes_to_read, &bytes_read)) {
+
                 size_t ints_read = bytes_read / sizeof(int);
-                for (int i = 0; i < ints_read; i++) {
-                    if (buffer[i] == value) {
-                        local_results.push_back({buffer[i], base_address + i * sizeof(int)});
+                int* data = buffer.data();
+
+                for (size_t j = 0; j < ints_read; j++) {
+                    if (data[j] == value) {
+                        cache_buffer[cache_count++] = {data[j], base_address + j * sizeof(int)};
+
+                        if (cache_count == CACHE_SIZE) {
+                            flush_cache();
+                        }
                     }
                 }
             }
-            base_address += buffer.size() * sizeof(int);
+            base_address += bytes_read;
         }
     }
 
+    flush_cache();
+
     if (!local_results.empty()) {
         std::lock_guard<std::mutex> lock(results_mutex);
-        scanned_ints.insert(scanned_ints.end(), local_results.begin(), local_results.end());
+        scanned_ints.insert(scanned_ints.end(),
+                            std::make_move_iterator(local_results.begin()),
+                            std::make_move_iterator(local_results.end()));
     }
+
+
+    delete[] cache_buffer;
 }
 
 
@@ -131,23 +171,97 @@ void scanner::filter_int(int value) {
 }
 
 void scanner::filter_int_thread(int value, size_t start_idx, size_t end_idx, const std::vector<scanned_value<int>>& source_values) {
+    const size_t CACHE_SIZE = 16384;
+    scanned_value<int>* cache_buffer = new scanned_value<int>[CACHE_SIZE];
+    memset(cache_buffer, 0, sizeof(scanned_value<int>[CACHE_SIZE]));
+    size_t cache_count = 0;
+
     std::vector<scanned_value<int>> local_results;
-    int buffer = -1;
+    local_results.reserve((end_idx - start_idx) / 3); 
+
+    auto flush_cache = [&] () {
+        if (cache_count > 0) {
+            local_results.insert(local_results.end(), cache_buffer, cache_buffer + cache_count);
+            cache_count = 0;
+        }
+    };
+
+    const size_t BLOCK_SIZE = 4096; 
+    int* block_buffer = new int[BLOCK_SIZE / sizeof(int)];
+    memset(block_buffer, 0, sizeof(int[BLOCK_SIZE / sizeof(int)]));
+    
+    struct PageCache
+    {
+        uintptr_t page_addr;
+        int data[BLOCK_SIZE / sizeof(int)];
+        bool valid;
+    };
+
+    const size_t PAGE_CACHE_SIZE = 32;
+    PageCache* page_cache = new PageCache[PAGE_CACHE_SIZE];
+    memset(page_cache, 0, sizeof(PageCache[PAGE_CACHE_SIZE]));
+    size_t cache_next = 0;
+
+    for (size_t i = 0; i < PAGE_CACHE_SIZE; i++) {
+        page_cache[i].valid = false;
+        page_cache[i].page_addr = 0;
+    }
+
+    auto get_page_data = [&] (uintptr_t addr) -> int* {
+        uintptr_t page_addr = addr & ~(BLOCK_SIZE - 1);
+
+        for (size_t i = 0; i < PAGE_CACHE_SIZE; i++) {
+            if (page_cache[i].valid && page_cache[i].page_addr == page_addr) {
+                return page_cache[i].data;
+            }
+        }
+
+        PageCache& new_cache = page_cache[cache_next];
+        cache_next = (cache_next + 1) % PAGE_CACHE_SIZE;
+
+        new_cache.valid = false;
+        new_cache.page_addr = page_addr;
+
+        size_t bytes_read = 0;
+        if (ReadProcessMemory(attached_handle, (void*)page_addr, new_cache.data,
+            BLOCK_SIZE, &bytes_read) && bytes_read > 0) {
+            new_cache.valid = true;
+            return new_cache.data;
+        }
+
+        return nullptr;
+    };
 
     for (size_t i = start_idx; i < end_idx; i++) {
-        const auto& v = source_values[i];
-        size_t bytes_read = 0;
-        if (ReadProcessMemory(attached_handle, (void*)v.address, &buffer, sizeof(int), &bytes_read)) {
-            if (buffer == value) {
-                local_results.push_back({buffer, v.address});
+        uintptr_t addr = source_values[i].address;
+
+        int* page_data = get_page_data(addr);
+
+        if (page_data) {
+            size_t offset = (addr & (BLOCK_SIZE - 1)) / sizeof(int);
+
+            if (page_data[offset] == value) {
+                cache_buffer[cache_count++] = {value, addr};
+
+                if (cache_count == CACHE_SIZE) {
+                    flush_cache();
+                }
             }
         }
     }
 
+    flush_cache();
+
     if (!local_results.empty()) {
         std::lock_guard<std::mutex> lock(results_mutex);
-        scanned_ints.insert(scanned_ints.end(), local_results.begin(), local_results.end());
+        scanned_ints.insert(scanned_ints.end(),
+                            std::make_move_iterator(local_results.begin()),
+                            std::make_move_iterator(local_results.end()));
+
     }
+    delete[] block_buffer;
+    delete[] page_cache;
+    delete[] cache_buffer;
 }
 
 void scanner::print_scanned_ints() {
