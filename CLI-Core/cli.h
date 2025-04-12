@@ -294,7 +294,11 @@ R"""(
                         int value = atoi(args[2].c_str());
                         scanner->setup(core->get_pid(), core->get_handle());
                         scanner->filter_int(value);
-                        scanner->print_scanned_ints();
+                        int scanned_count = scanner->get_scanned_count();
+                        std::cout << "Found " << scanned_count << " values\n";
+                        if (scanned_count < 250) {
+                            scanner->print_scanned_ints();
+                        }
                         return;
                     }
                 }

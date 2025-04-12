@@ -55,6 +55,7 @@ void scanner::search_int(int value){
         return;
     }
     
+    scanned_ints.clear();
     size_t regions_per_thread = (scanned_regions.size() + num_threads - 1) / num_threads;
     std::vector<std::thread> local_threads;
 
